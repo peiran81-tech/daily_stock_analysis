@@ -424,6 +424,9 @@ jobs:
           # ==========================================
           # 避免直接写入 STOCK_LIST，保留同名 Environment variables 的 runner 环境值。
           STOCK_LIST_CONFIG: ${{ vars.STOCK_LIST || secrets.STOCK_LIST }}
+          # 手动持仓（HOLDINGS，格式：代码:股数:成本价，多只用逗号分隔）。
+          # 在 Secrets 中配置；未配置时持仓相关能力保持关闭，行为不变。
+          HOLDINGS: ${{ secrets.HOLDINGS }}
           MARKET_REVIEW_REGION: ${{ vars.MARKET_REVIEW_REGION || secrets.MARKET_REVIEW_REGION || 'cn' }}
           MARKET_REVIEW_COLOR_SCHEME: ${{ vars.MARKET_REVIEW_COLOR_SCHEME || secrets.MARKET_REVIEW_COLOR_SCHEME || 'green_up' }}
           

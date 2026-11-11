@@ -37,7 +37,7 @@ from src.notification_contracts import (
     is_feishu_app_bot_configured,
     is_feishu_static_configured,
 )
-from src.services.stock_list_parser import split_stock_list
+from src.services.stock_list_parser import Holding, parse_holdings, split_stock_list
 from src.llm.backend_registry import (
     AUTO_AGENT_BACKEND_ID,
     GENERATION_ONLY_BACKEND_IDS,
@@ -980,6 +980,11 @@ class Config:
     # === 自选股配置 ===
     stock_list: List[str] = field(default_factory=list)
 
+    # === 手动持仓配置（HOLDINGS）===
+    # 格式：代码:股数:成本价，多只用逗号分隔，例如 600519:100:10.00。
+    # 未配置时为空 dict，持仓相关能力保持关闭，行为与此前完全一致。
+    holdings: Dict[str, Holding] = field(default_factory=dict)
+
     # === 飞书云文档配置 ===
     feishu_app_id: Optional[str] = None
     feishu_app_secret: Optional[str] = None
@@ -1569,7 +1574,16 @@ class Config:
             for c in split_stock_list(stock_list_str)
             if (c or "").strip()
         ]
-        
+
+        # 解析手动持仓（HOLDINGS，格式：代码:股数:成本价，多只用逗号分隔）。
+        # 格式错误的条目由 parse_holdings 打日志警告并跳过，不会阻断启动。
+        holdings_str = cls._resolve_env_value(
+            'HOLDINGS',
+            default='',
+            prefer_env_file=True,
+        )
+        holdings = parse_holdings(holdings_str)
+
         # === LiteLLM multi-key parsing ===
         # GEMINI_API_KEYS (comma-separated) > GEMINI_API_KEY (single)
         _gemini_keys_raw = os.getenv('GEMINI_API_KEYS', '')
@@ -1916,6 +1930,7 @@ class Config:
 
         return cls(
             stock_list=stock_list,
+            holdings=holdings,
             feishu_app_id=os.getenv('FEISHU_APP_ID'),
             feishu_app_secret=os.getenv('FEISHU_APP_SECRET'),
             feishu_folder_token=os.getenv('FEISHU_FOLDER_TOKEN'),
@@ -3249,7 +3264,27 @@ class Config:
         ]
 
         self.stock_list = stock_list
-    
+
+    def refresh_holdings(self) -> None:
+        """
+        热读取 HOLDINGS 环境变量并更新配置中的手动持仓
+
+        与 :meth:`refresh_stock_list` 相同的读取顺序（.env 文件优先，其次
+        系统环境变量），供定时任务在每次执行前调用。格式错误的条目由
+        parse_holdings 打日志警告并跳过，不会阻断分析。
+        """
+        env_file = os.getenv("ENV_FILE")
+        env_path = Path(env_file) if env_file else (Path(__file__).parent.parent / '.env')
+        holdings_str = ''
+        if env_path.exists():
+            env_values = dotenv_values(env_path)
+            holdings_str = (env_values.get('HOLDINGS') or '').strip()
+
+        if not holdings_str:
+            holdings_str = os.getenv('HOLDINGS', '')
+
+        self.holdings = parse_holdings(holdings_str)
+
     def validate_structured(self) -> List[ConfigIssue]:
         """Return structured validation issues with severity levels.
 

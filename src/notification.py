@@ -38,6 +38,7 @@ from src.notification_noise import (
     release_notification_noise,
 )
 from src.report_language import (
+    format_holding_facts,
     get_localized_stock_name,
     get_report_labels,
     get_signal_level,
@@ -1412,6 +1413,15 @@ class NotificationService(
                         "|---------|---------|",
                         f"| 🆕 **{labels['no_position_label']}** | {pos_advice.get('no_position', self._get_display_operation_advice(result, report_language))} |",
                         f"| 💼 **{labels['has_position_label']}** | {pos_advice.get('has_position', labels['continue_holding'])} |",
+                        "",
+                    ])
+                # 手动持仓（HOLDINGS）实数：只在配置了该只持仓时出现。
+                holding_facts = format_holding_facts(
+                    getattr(result, "holding", None), labels
+                )
+                if holding_facts:
+                    report_lines.extend([
+                        f"**💼 {labels['my_holding_label']}**：{holding_facts}",
                         "",
                     ])
 

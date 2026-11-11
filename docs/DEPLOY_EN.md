@@ -396,6 +396,7 @@ Add these Secrets:
 | `SERVERCHAN3_SENDKEY` | ServerChan v3 Sendkey | Optional* |
 | `CUSTOM_WEBHOOK_URLS` | Custom Webhook (comma-separated for multiple) | Optional* |
 | `STOCK_LIST` | Watchlist, e.g., `600519,300750` | ✅ |
+| `HOLDINGS` | Manual holdings, formatted as `code:shares:cost` and comma-separated for multiple stocks, e.g., `600519:100:10.00`; once configured, holder advice is tailored to the real position | Optional |
 | `SERPAPI_API_KEYS` | SerpAPI Key | Recommended |
 | `ANSPIRE_API_KEYS` | [Anspire](https://open.anspire.cn/dsa?share_code=QFBC0FYC) API key (optional; shared by LLM and search; availability depends on account permissions) | Optional |
 | `TAVILY_API_KEYS` | Tavily Search API Key | Optional |

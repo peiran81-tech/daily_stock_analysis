@@ -385,6 +385,13 @@ _REPORT_LABELS: Dict[str, Dict[str, str]] = {
         "no_position_label": "空仓者",
         "has_position_label": "持仓者",
         "continue_holding": "继续持有",
+        "my_holding_label": "我的持仓",
+        "holding_shares_label": "持仓股数",
+        "holding_cost_label": "成本价",
+        "holding_current_price_label": "现价",
+        "holding_pnl_label": "浮动盈亏",
+        "holding_breakeven_gap_label": "距回本",
+        "holding_above_cost": "已回本",
         "market_snapshot_heading": "当日行情",
         "close_label": "收盘",
         "prev_close_label": "昨收",
@@ -520,6 +527,13 @@ _REPORT_LABELS: Dict[str, Dict[str, str]] = {
         "no_position_label": "No Position",
         "has_position_label": "Holding",
         "continue_holding": "Continue holding",
+        "my_holding_label": "My Holding",
+        "holding_shares_label": "Shares Held",
+        "holding_cost_label": "Cost",
+        "holding_current_price_label": "Current Price",
+        "holding_pnl_label": "Floating P&L",
+        "holding_breakeven_gap_label": "Gap to Breakeven",
+        "holding_above_cost": "At or above cost",
         "market_snapshot_heading": "Market Snapshot",
         "close_label": "Close",
         "prev_close_label": "Prev Close",
@@ -655,6 +669,13 @@ _REPORT_LABELS: Dict[str, Dict[str, str]] = {
         "no_position_label": "미보유",
         "has_position_label": "보유 중",
         "continue_holding": "보유 유지",
+        "my_holding_label": "내 보유",
+        "holding_shares_label": "보유 수량",
+        "holding_cost_label": "매입가",
+        "holding_current_price_label": "현재가",
+        "holding_pnl_label": "평가손익",
+        "holding_breakeven_gap_label": "본전까지",
+        "holding_above_cost": "본전 이상",
         "market_snapshot_heading": "시세 스냅샷",
         "close_label": "종가",
         "prev_close_label": "전일 종가",
@@ -833,6 +854,46 @@ def get_report_labels(language: Optional[str]) -> Dict[str, str]:
     """Return UI copy for the selected report language."""
     normalized = normalize_report_language(language)
     return _REPORT_LABELS[normalized]
+
+
+def format_holding_facts(holding: Any, labels: Dict[str, str]) -> str:
+    """Format one manual-holding snapshot as a single facts line.
+
+    Returns "" when ``holding`` is not a snapshot dict with shares, so
+    callers only render the line when a real position exists. The snapshot
+    itself comes from
+    :func:`src.services.stock_list_parser.build_holding_snapshot`; this only
+    formats its numbers for display.
+    """
+    if not isinstance(holding, dict) or not holding.get("shares"):
+        return ""
+    shares = holding["shares"]
+    shares_text = f"{shares:g}" if isinstance(shares, (int, float)) else str(shares)
+    cost = holding.get("cost")
+    cost_text = f"{cost:g}" if isinstance(cost, (int, float)) else "N/A"
+    price = holding.get("current_price")
+    price_text = f"{price:g}" if isinstance(price, (int, float)) else "N/A"
+    pnl = holding.get("floating_pnl")
+    pnl_pct = holding.get("floating_pnl_pct")
+    if isinstance(pnl, (int, float)) and isinstance(pnl_pct, (int, float)):
+        pnl_text = f"{pnl:+,.2f} ({pnl_pct:+.2f}%)"
+    else:
+        pnl_text = "N/A"
+    gap = holding.get("breakeven_gap_pct")
+    if not isinstance(gap, (int, float)):
+        gap_text = "N/A"
+    elif gap <= 0:
+        gap_text = labels.get("holding_above_cost", "已回本")
+    else:
+        gap_text = f"{gap:.2f}%"
+    parts = [
+        f"{labels.get('holding_shares_label', '持仓股数')} {shares_text}",
+        f"{labels.get('holding_cost_label', '成本价')} {cost_text}",
+        f"{labels.get('holding_current_price_label', '现价')} {price_text}",
+        f"{labels.get('holding_pnl_label', '浮动盈亏')} {pnl_text}",
+        f"{labels.get('holding_breakeven_gap_label', '距回本')} {gap_text}",
+    ]
+    return " | ".join(parts)
 
 
 def get_placeholder_text(language: Optional[str]) -> str:

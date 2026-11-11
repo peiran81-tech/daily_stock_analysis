@@ -104,6 +104,7 @@ from src.schemas.decision_scale import (
 from src.schemas.report_schema import AnalysisReportSchema
 from src.market_context import detect_market, get_market_role, get_market_guidelines
 from src.services.daily_market_context import format_daily_market_context_prompt_section
+from src.services.stock_list_parser import build_holding_snapshot
 from src.market_phase_prompt import format_market_phase_prompt_section
 from src.market_structure_prompt import format_market_structure_prompt_section
 
@@ -1802,6 +1803,11 @@ class AnalysisResult:
     current_price: Optional[float] = None  # 分析时的股价
     change_pct: Optional[float] = None     # 分析时的涨跌幅(%)
 
+    # ========== 手动持仓快照（HOLDINGS）==========
+    # 由 HOLDINGS 配置生成：持仓股数、成本价、现价、浮盈亏、距回本幅度。
+    # 未配置 HOLDINGS 时为 None，报告与提示词行为与此前完全一致。
+    holding: Optional[Dict[str, Any]] = None
+
     # ========== 模型标记（Issue #528）==========
     model_used: Optional[str] = None  # 分析使用的 LLM 模型（完整名，如 gemini/gemini-3.6-flash）
 
@@ -1852,6 +1858,7 @@ class AnalysisResult:
             'error_message': self.error_message,
             'current_price': self.current_price,
             'change_pct': self.change_pct,
+            'holding': self.holding,
             'model_used': self.model_used,
             'market_structure_context': self.market_structure_context,
         }
@@ -1990,7 +1997,7 @@ class GeminiAnalyzer:
             "time_sensitivity": "立即行动/今日内/本周内/不急",
             "position_advice": {
                 "no_position": "空仓者建议：具体操作指引",
-                "has_position": "持仓者建议：具体操作指引"
+                "has_position": "持仓者建议：具体操作指引；若上方提供了【我的持仓】，必须结合持仓股数、成本价、浮盈亏给出针对性建议（具体减仓价位、止损价位），不要给通用话术"
             }
         },
 
@@ -2178,7 +2185,7 @@ class GeminiAnalyzer:
             "time_sensitivity": "立即行动/今日内/本周内/不急",
             "position_advice": {
                 "no_position": "空仓者建议：具体操作指引",
-                "has_position": "持仓者建议：具体操作指引"
+                "has_position": "持仓者建议：具体操作指引；若上方提供了【我的持仓】，必须结合持仓股数、成本价、浮盈亏给出针对性建议（具体减仓价位、止损价位），不要给通用话术"
             }
         },
 
@@ -2358,7 +2365,7 @@ Output strictly in the following JSON format. This is a complete Decision Dashbo
             "time_sensitivity": "Act now/Today/This week/No rush",
             "position_advice": {
                 "no_position": "Advice for those without a position: concrete action",
-                "has_position": "Advice for holders: concrete action"
+                "has_position": "Advice for holders: concrete action; if a [My Holding] section is provided above, tailor the advice to that position (shares, cost, floating P&L) with concrete trim and stop-loss prices instead of generic guidance"
             }
         },
 
@@ -4060,6 +4067,9 @@ Output strictly in the following JSON format. This is a complete Decision Dashbo
         code = context.get('code', 'Unknown')
         config = self._get_runtime_config()
         report_language = normalize_report_language(getattr(config, "report_language", "zh"))
+        # 配置了 HOLDINGS 且本只股票有持仓时，把持仓快照放进上下文：
+        # _format_prompt 用它向 LLM 说明真实仓位，分析完成后挂到结果上供报告渲染。
+        self._attach_holding_context(context, code, config)
         system_prompt = self._get_analysis_system_prompt(report_language, stock_code=code)
         skill_instructions, default_skill_policy, use_legacy_default_prompt = self._get_skill_prompt_sections()
         
@@ -4274,6 +4284,7 @@ Output strictly in the following JSON format. This is a complete Decision Dashbo
                 result = self._parse_response(response_text, code, name)
                 result.raw_response = response_text
                 result.search_performed = bool(news_context)
+                result.holding = context.get("holding")
                 result.market_snapshot = self._build_market_snapshot(context)
                 result.model_used = model_used
                 result.report_language = report_language
@@ -4350,6 +4361,99 @@ Output strictly in the following JSON format. This is a complete Decision Dashbo
                 report_language=report_language,
             )
     
+    def _attach_holding_context(
+        self,
+        context: Dict[str, Any],
+        code: str,
+        config: Any,
+    ) -> None:
+        """Attach the manual-holding snapshot for ``code`` to ``context``.
+
+        Reads ``config.holdings`` (parsed from HOLDINGS). When the stock has
+        no manual holding, or the config has no ``holdings`` attribute (older
+        callers), the context is left untouched so the analysis behaves
+        exactly as before. The snapshot's current price prefers the realtime
+        quote and falls back to today's close, matching the price the prompt
+        itself uses.
+        """
+        if not isinstance(context, dict):
+            return
+        holdings = getattr(config, "holdings", None)
+        if not isinstance(holdings, dict) or not holdings:
+            return
+        holding = holdings.get((code or "").strip().upper())
+        if holding is None:
+            return
+        price = None
+        realtime = context.get("realtime")
+        if isinstance(realtime, dict):
+            price = realtime.get("price")
+        if price is None:
+            today = context.get("today")
+            if isinstance(today, dict):
+                price = today.get("close")
+        context["holding"] = build_holding_snapshot(holding, price)
+
+    def _format_holdings_section(
+        self, context: Dict[str, Any], report_language: str = "zh"
+    ) -> str:
+        """Render the ``【我的持仓】`` block for the analysis prompt.
+
+        Returns "" when the context carries no holding snapshot, so prompts
+        for stocks without a manual holding are byte-identical to before.
+        """
+        holding = context.get("holding") if isinstance(context, dict) else None
+        if not isinstance(holding, dict) or not holding.get("shares"):
+            return ""
+        english = normalize_report_language(report_language) in ("en", "ko")
+        shares = f"{holding['shares']:g}"
+        cost = holding.get("cost")
+        cost_text = f"{cost:g}" if isinstance(cost, (int, float)) else "N/A"
+        price = holding.get("current_price")
+        price_text = f"{price:g}" if isinstance(price, (int, float)) else "N/A"
+        pnl = holding.get("floating_pnl")
+        pnl_pct = holding.get("floating_pnl_pct")
+        if isinstance(pnl, (int, float)) and isinstance(pnl_pct, (int, float)):
+            pnl_text = f"{pnl:+,.2f} ({pnl_pct:+.2f}%)"
+        else:
+            pnl_text = "N/A"
+        gap = holding.get("breakeven_gap_pct")
+        if not isinstance(gap, (int, float)):
+            gap_text = "N/A"
+        elif gap <= 0:
+            gap_text = "0% (at or above cost)" if english else "0%（已回本，现价 ≥ 成本价）"
+        else:
+            gap_text = (
+                f"{gap:.2f}% (price must rise {gap:.2f}% to reach cost)"
+                if english
+                else f"{gap:.2f}%（现价需再涨 {gap:.2f}% 才回到成本价）"
+            )
+        if english:
+            return f"""
+## 💼 My Holding (real position; holder advice must use it)
+| Item | Value |
+|------|------|
+| Shares Held | {shares} |
+| Cost Price | {cost_text} |
+| Current Price | {price_text} |
+| Floating P&L | {pnl_text} |
+| Gap to Breakeven | {gap_text} |
+
+> `position_advice.has_position` must be written for this exact position: use the cost and floating P&L above and give concrete trim and stop-loss prices instead of generic guidance. Advice for those without a position is unaffected by this section.
+"""
+        return f"""
+## 💼 我的持仓（真实仓位，持仓者建议必须据此给出）
+| 项目 | 数值 |
+|------|------|
+| 持仓股数 | {shares} 股 |
+| 成本价 | {cost_text} 元 |
+| 当前价 | {price_text} 元 |
+| 浮动盈亏 | {pnl_text} 元 |
+| 距回本还差 | {gap_text} |
+
+> 持仓者建议（position_advice.has_position）必须针对上面这笔真实仓位写：结合成本价与浮盈亏，给出具体的减仓价位、止损价位；不要给通用话术。空仓者建议不受本节影响。
+"""
+
     def _format_prompt(
         self, 
         context: Dict[str, Any], 
@@ -4446,6 +4550,7 @@ Output strictly in the following JSON format. This is a complete Decision Dashbo
 
 ---
 """
+        prompt += self._format_holdings_section(context, report_language)
         prompt += format_market_phase_prompt_section(
             context.get("market_phase_context"),
             report_language=report_language,

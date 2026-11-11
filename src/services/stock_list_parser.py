@@ -31,18 +31,24 @@ those wait for later phases of issue #2063.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "AnalysisTarget",
+    "Holding",
     "IndexRegistry",
     "IndexEntry",
     "ParseStatus",
+    "build_holding_snapshot",
     "parse_analysis_target",
+    "parse_holdings",
     "serialize_stock_list",
     "split_stock_list",
     "default_index_registry",
@@ -50,6 +56,10 @@ __all__ = [
 
 
 _STOCK_LIST_SEPARATOR_RE = re.compile(r"[\s,;\uFF0C\u3001\uFF1B]+")
+# HOLDINGS entries are split on commas/semicolons only: whitespace is allowed
+# around the colons inside an entry (``600519 : 100 : 10.00``), so it must
+# not act as a separator here the way it does for STOCK_LIST tokens.
+_HOLDINGS_SEPARATOR_RE = re.compile(r"[,;\uFF0C\u3001\uFF1B]+")
 _EXPLICIT_INDEX_ALIAS_RE = re.compile(
     r"^(?:(?:sh|sz|csi)\d{6}|\d{6}\.(?:sh|sz|csi))$"
 )
@@ -1150,3 +1160,103 @@ def parse_stock_list(value: str, registry: Optional[IndexRegistry] = None) -> Li
         parse_analysis_target(token, registry=registry)
         for token in split_stock_list(value)
     ]
+
+
+# ---------------------------------------------------------------------------
+# Manual holdings (HOLDINGS env var).
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class Holding:
+    """One manual position from HOLDINGS: ``code:shares:cost``.
+
+    ``shares`` is the number of shares held and ``cost`` is the per-share
+    cost price. Codes are normalized the same way as STOCK_LIST entries
+    (stripped + upper-cased) so lookups never miss on case or whitespace.
+    """
+
+    code: str
+    shares: float
+    cost: float
+
+
+def parse_holdings(value: str) -> Dict[str, Holding]:
+    """Parse a HOLDINGS value into ``{code: Holding}``.
+
+    Format: ``code:shares:cost`` entries separated by commas, e.g.
+    ``600519:100:10.00,000001:200:12.50``.
+
+    Entries are split on commas only (never on whitespace, which may sit
+    around the colons: ``600519 : 100 : 10.00`` is one entry). Malformed
+    entries are skipped with a warning and never raise, so a typo in one
+    entry cannot take down the whole analysis run. An empty or unset value
+    returns an empty dict, which keeps every holdings feature disabled and
+    preserves the previous behaviour exactly.
+    """
+    holdings: Dict[str, Holding] = {}
+    for token in _HOLDINGS_SEPARATOR_RE.split(value or ""):
+        parts = token.split(":")
+        if len(parts) != 3:
+            logger.warning(
+                "[HOLDINGS] 跳过格式错误的条目 %r，应为 代码:股数:成本价", token
+            )
+            continue
+        raw_code, raw_shares, raw_cost = (part.strip() for part in parts)
+        code = (raw_code or "").upper()
+        if not code:
+            logger.warning("[HOLDINGS] 跳过格式错误的条目 %r：股票代码为空", token)
+            continue
+        try:
+            shares = float(raw_shares)
+            cost = float(raw_cost)
+        except ValueError:
+            logger.warning(
+                "[HOLDINGS] 跳过格式错误的条目 %r：股数/成本价不是数字", token
+            )
+            continue
+        if shares <= 0 or cost <= 0:
+            logger.warning(
+                "[HOLDINGS] 跳过格式错误的条目 %r：股数和成本价必须大于 0", token
+            )
+            continue
+        holdings[code] = Holding(code=code, shares=shares, cost=cost)
+    return holdings
+
+
+def build_holding_snapshot(
+    holding: Holding, current_price: Optional[float]
+) -> Dict[str, Any]:
+    """Build display-ready facts for one holding at ``current_price``.
+
+    ``breakeven_gap_pct`` is the rise still needed from the current price to
+    reach the cost price (``(cost - price) / price * 100``); it is 0 or
+    negative once the position is at or above cost. When the price is unknown
+    or not positive, the monetary fields stay None and callers must render
+    them as unavailable instead of inventing numbers.
+    """
+    snapshot: Dict[str, Any] = {
+        "code": holding.code,
+        "shares": holding.shares,
+        "cost": holding.cost,
+        "current_price": None,
+        "market_value": None,
+        "floating_pnl": None,
+        "floating_pnl_pct": None,
+        "breakeven_gap_pct": None,
+    }
+    if current_price is None:
+        return snapshot
+    try:
+        price = float(current_price)
+    except (TypeError, ValueError):
+        return snapshot
+    if price <= 0:
+        return snapshot
+    snapshot["current_price"] = price
+    snapshot["market_value"] = round(holding.shares * price, 2)
+    snapshot["floating_pnl"] = round((price - holding.cost) * holding.shares, 2)
+    if holding.cost > 0:
+        snapshot["floating_pnl_pct"] = round(
+            (price - holding.cost) / holding.cost * 100, 2
+        )
+    snapshot["breakeven_gap_pct"] = round((holding.cost - price) / price * 100, 2)
+    return snapshot

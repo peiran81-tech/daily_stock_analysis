@@ -438,6 +438,7 @@ git push -u origin main
 | `SERVERCHAN3_SENDKEY` | Server酱³ Sendkey | 可选* |
 | `CUSTOM_WEBHOOK_URLS` | 自定义 Webhook（多个逗号分隔） | 可选* |
 | `STOCK_LIST` | 自选股列表，如 `600519,300750` | ✅ |
+| `HOLDINGS` | 手动持仓，格式为 `代码:股数:成本价`，多只用逗号分隔，如 `600519:100:10.00`；配置后持仓者建议针对真实仓位给出 | 可选 |
 | `SERPAPI_API_KEYS` | SerpAPI Key | 推荐 |
 | `ANSPIRE_API_KEYS` | [Anspire](https://open.anspire.cn/dsa?share_code=QFBC0FYC) API Key（可选，模型与搜索共用；可用性以账号权限为准） | 可选 |
 | `TAVILY_API_KEYS` | Tavily 搜索 API Key | 可选 |

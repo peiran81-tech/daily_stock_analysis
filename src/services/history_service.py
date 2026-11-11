@@ -21,6 +21,7 @@ from src.formatters import markdown_to_plain_text
 from src.data.stock_index_loader import resolve_index_stock_code
 from src.services.stock_code_utils import resolve_daily_stock_identity
 from src.report_language import (
+    format_holding_facts,
     get_bias_status_emoji,
     get_localized_stock_name,
     get_report_labels,
@@ -1097,6 +1098,7 @@ class HistoryService:
                 data_sources=raw_result.get("data_sources", ""),
                 success=raw_result.get("success", True),
                 error_message=raw_result.get("error_message"),
+                holding=raw_result.get("holding"),
                 current_price=raw_result.get("current_price"),
                 change_pct=raw_result.get("change_pct"),
                 model_used=raw_result.get("model_used"),
@@ -1226,6 +1228,15 @@ class HistoryService:
                 "|---------|---------|",
                 f"| 🆕 **{labels['no_position_label']}** | {pos_advice.get('no_position', self._get_display_operation_advice(result, report_language))} |",
                 f"| 💼 **{labels['has_position_label']}** | {pos_advice.get('has_position', labels['continue_holding'])} |",
+                "",
+            ])
+        # 手动持仓（HOLDINGS）实数：只在该只历史记录带有持仓快照时出现。
+        holding_facts = format_holding_facts(
+            getattr(result, "holding", None), labels
+        )
+        if holding_facts:
+            report_lines.extend([
+                f"**💼 {labels['my_holding_label']}**：{holding_facts}",
                 "",
             ])
 

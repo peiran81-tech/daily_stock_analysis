@@ -151,6 +151,7 @@ Go to your forked repo → `Settings` → `Secrets and variables` → `Actions` 
 | Secret Name | Description | Required |
 |------------|------|:----:|
 | `STOCK_LIST` | Watchlist codes, e.g., `600519,300750,002594,7203.T,005930.KS`; English commas are recommended, while pasted Chinese commas, enumeration commas, semicolons, spaces, and newlines are recognized and normalized to English commas | ✅ |
+| `HOLDINGS` | Manual holdings, formatted as `code:shares:cost` and comma-separated for multiple stocks, e.g., `600519:100:10.00`; once configured, the holder advice in AI reports is tailored to the real position (shares, cost, floating P&L, gap to breakeven) instead of generic guidance; leave unset to keep the previous behaviour; keep real holdings only in `.env` or GitHub Secrets, never commit them to the repo | Optional |
 | `SERPAPI_API_KEYS` | [SerpAPI](https://serpapi.com/github-daily-stock-analysis) search-engine results for realtime financial news | Recommended |
 | `ANSPIRE_API_KEYS` | [Anspire](https://open.anspire.cn/dsa?share_code=QFBC0FYC) API key (optional; shared by LLM and search; availability depends on account permissions) | Optional |
 | `TAVILY_API_KEYS` | [Tavily](https://tavily.com/) Search API (for news search) | Optional |

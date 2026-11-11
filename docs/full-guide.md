@@ -158,6 +158,7 @@ daily_stock_analysis/
 | Secret 名称 | 说明 | 必填 |
 |------------|------|:----:|
 | `STOCK_LIST` | 自选股代码，如 `600519,300750,002594,7203.T,005930.KS`；推荐使用英文逗号，中文逗号、顿号、分号、空格和换行会被识别并规范为英文逗号 | ✅ |
+| `HOLDINGS` | 手动持仓，格式为 `代码:股数:成本价`，多只用逗号分隔，如 `600519:100:10.00`；配置后 AI 报告里的持仓者建议会针对真实仓位（持仓股数、成本价、浮盈亏、距回本幅度）给出，不配则保持通用建议；真实持仓只写进 `.env` 或 GitHub Secrets，不要提交到仓库 | 可选 |
 | `SERPAPI_API_KEYS` | [SerpAPI](https://serpapi.com/github-daily-stock-analysis) 搜索引擎结果补强，适合实时金融新闻 | 推荐 |
 | `ANSPIRE_API_KEYS` | [Anspire](https://open.anspire.cn/dsa?share_code=QFBC0FYC) API Key（可选，模型与搜索共用；可用性以账号权限为准） | 可选 |
 | `TAVILY_API_KEYS` | [Tavily](https://tavily.com/) 搜索 API（新闻搜索） | 可选 |

@@ -18,11 +18,14 @@ import pytest
 
 from src.services.stock_list_parser import (
     AnalysisTarget,
+    Holding,
     IndexEntry,
     IndexRegistry,
     ParseStatus,
+    build_holding_snapshot,
     default_index_registry,
     parse_analysis_target,
+    parse_holdings,
     parse_stock_list,
     serialize_stock_list,
     split_stock_list,
@@ -1149,3 +1152,72 @@ class TestIndexAliasMatrix:
         assert a.asset_type == ParseStatus.INDEX
         assert b.asset_type == ParseStatus.INDEX
         assert a.canonical_id == b.canonical_id
+
+
+# ---------------------------------------------------------------------------
+# Manual holdings (HOLDINGS) — fake placeholder values only.
+# ---------------------------------------------------------------------------
+def test_parse_holdings_accepts_code_shares_cost_entries() -> None:
+    holdings = parse_holdings("600519:100:10.00,000001:200:12.50")
+
+    assert holdings["600519"] == Holding(code="600519", shares=100.0, cost=10.00)
+    assert holdings["000001"] == Holding(code="000001", shares=200.0, cost=12.50)
+
+
+def test_parse_holdings_returns_empty_dict_when_unset() -> None:
+    assert parse_holdings("") == {}
+    assert parse_holdings("   ") == {}
+
+
+def test_parse_holdings_skips_malformed_entries_without_raising(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    holdings = parse_holdings(
+        "600519:100:10.00,bad-entry,000001:not-a-number:12.50,"
+        "000002:100,000003:0:10.00,000004:100:-5"
+    )
+
+    assert holdings == {"600519": Holding(code="600519", shares=100.0, cost=10.00)}
+    assert "跳过格式错误" in caplog.text
+
+
+def test_parse_holdings_normalizes_code_case_and_whitespace() -> None:
+    holdings = parse_holdings("  hk00700 : 50 : 20.00 ")
+
+    assert holdings == {"HK00700": Holding(code="HK00700", shares=50.0, cost=20.00)}
+
+
+def test_build_holding_snapshot_computes_pnl_and_breakeven_gap() -> None:
+    snapshot = build_holding_snapshot(
+        Holding(code="600519", shares=100.0, cost=10.00), 12.00
+    )
+
+    assert snapshot["shares"] == 100.0
+    assert snapshot["cost"] == 10.00
+    assert snapshot["current_price"] == 12.00
+    assert snapshot["market_value"] == 1200.00
+    assert snapshot["floating_pnl"] == 200.00
+    assert snapshot["floating_pnl_pct"] == 20.00
+    assert snapshot["breakeven_gap_pct"] == -16.67
+
+
+def test_build_holding_snapshot_below_cost_needs_positive_gap() -> None:
+    snapshot = build_holding_snapshot(
+        Holding(code="600519", shares=100.0, cost=10.00), 8.00
+    )
+
+    assert snapshot["floating_pnl"] == -200.00
+    assert snapshot["floating_pnl_pct"] == -20.00
+    assert snapshot["breakeven_gap_pct"] == 25.00
+
+
+def test_build_holding_snapshot_without_price_keeps_pnl_unknown() -> None:
+    snapshot = build_holding_snapshot(
+        Holding(code="600519", shares=100.0, cost=10.00), None
+    )
+
+    assert snapshot["current_price"] is None
+    assert snapshot["market_value"] is None
+    assert snapshot["floating_pnl"] is None
+    assert snapshot["floating_pnl_pct"] is None
+    assert snapshot["breakeven_gap_pct"] is None

@@ -974,6 +974,7 @@ def run_full_analysis(
         # Issue #529: Hot-reload STOCK_LIST from .env on each scheduled run
         if stock_codes is None and portfolio_stock_codes is None and refresh_watchlist:
             config.refresh_stock_list()
+            config.refresh_holdings()
 
         using_config_stock_list = stock_codes is None and portfolio_stock_codes is None
         effective_codes = stock_codes if stock_codes is not None else config.stock_list
